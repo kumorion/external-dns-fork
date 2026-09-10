@@ -203,6 +203,10 @@ func (p *Plan) calculateChanges(t planTable) *Changes {
 
 	for key, row := range t.rows {
 		switch {
+		// hypothesis 7: with an empty AXFR every source endpoint lands here, because
+		// row.current (from the registry) is empty. So every managed record is
+		// re-CREATED on every cycle, including its ownership TXT. RFC2136 Insert is
+		// an RRset merge, so this looks idempotent in DNS and the creates "succeed".
 		// dns name not taken
 		case len(row.current) == 0:
 			recordsByType := t.resolver.ResolveRecordTypes(key, row)
@@ -212,6 +216,11 @@ func (p *Plan) calculateChanges(t planTable) *Changes {
 				}
 			}
 
+		// hypothesis 8: deletes ONLY come from this branch, which needs row.current to
+		// be populated. When the DNSEndpoint CRD is removed the candidate disappears,
+		// but row.current is also empty (AXFR never delivered), so the row does not
+		// exist at all and no Delete is emitted. The record and its TXT marker are
+		// orphaned in PowerDNS while the CRD delete succeeds and DPS is happy.
 		// dns name released or possibly owned by a different external dns
 		case len(row.candidates) == 0:
 			changes.Delete = append(changes.Delete, row.current...)
