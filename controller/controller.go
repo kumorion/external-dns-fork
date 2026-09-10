@@ -73,6 +73,10 @@ func (c *Controller) RunOnce(ctx context.Context) error {
 	c.lastRunAt = time.Now()
 	c.runAtMutex.Unlock()
 
+	// hypothesis 2: this is the ONLY place the controller learns what already exists
+	// in DNS. If the registry hands back an empty slice with a nil error, the whole
+	// run proceeds believing the zone is empty. If it hands back an error, the run
+	// aborts here and nothing below executes (no creates, no deletes).
 	regRecords, err := c.Registry.Records(ctx)
 	if err != nil {
 		registryErrorsTotal.Counter.Inc()
@@ -183,6 +187,10 @@ func (c *Controller) Run(ctx context.Context) error {
 	defer ticker.Stop()
 	var softErrorCount int
 	for {
+		// hypothesis 1: every tick of --interval (default 1m), plus every k8s event when
+		// --update-events is on (throttled by --min-event-sync-interval, default 5s),
+		// runs a full reconcile. There is no incremental path: each RunOnce re-lists
+		// the entire zone via AXFR before it does anything else.
 		if c.ShouldRunOnce(time.Now()) {
 			if err := c.RunOnce(ctx); err != nil {
 				if errors.Is(err, provider.SoftError) {

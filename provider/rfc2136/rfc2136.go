@@ -225,6 +225,9 @@ func (r *rfc2136Provider) KeyData(nameserver string) (string, *gss.Client, error
 
 // Records returns the list of records.
 func (r *rfc2136Provider) Records(_ context.Context) ([]*endpoint.Endpoint, error) {
+	// hypothesis 4: Records() is a thin wrapper over List(). Whatever List() returns
+	// becomes the "current state" for the planner. There is no filter, no search,
+	// no per-name lookup: AXFR (RFC 5936) is all-or-nothing by design.
 	rrs, err := r.List()
 	if err != nil {
 		return nil, err
@@ -345,6 +348,14 @@ func (r *rfc2136Provider) List() ([]dns.RR, error) {
 
 			var attempt []dns.RR
 			var attemptErr error
+			// hypothesis 5: on the deployed image (v0.22.0 and earlier) this branch did
+			// log.Errorf("AXFR error: ...") then `continue`, never setting an error.
+			// A read timeout mid-transfer therefore returned an EMPTY (or partial)
+			// record list with a nil error, i.e. "success, zone is empty".
+			// That is the "AXFR error: i/o timeout" line immediately followed by
+			// "Adding RR" in the same second. Upstream PR 6652 (commit 2a47cf7b, after
+			// v0.22.0) changed it to the attemptErr handling below, which makes the
+			// reconcile abort instead of proceeding blind.
 			for e := range env {
 				if e.Error != nil {
 					if errors.Is(e.Error, dns.ErrSoa) {
@@ -701,6 +712,11 @@ func makeClient(r *rfc2136Provider, nameserver string) (*dns.Client, error) {
 	// Remove port from nameserver
 	nameserver = strings.Split(nameserver, ":")[0]
 
+	// hypothesis 6: no ReadTimeout / WriteTimeout / DialTimeout is ever set on the
+	// dns.Client, so miekg/dns falls back to its 2s default. A full zone transfer of
+	// a large enterprise zone cannot complete in 2s, hence the persistent
+	// "read tcp ...:53: i/o timeout" on AXFR. The same client is used for RFC2136
+	// updates, which is why the create at 11:24:03 timed out as well.
 	if r.tlsConfig.UseTLS {
 		log.Debug("RFC2136 Connecting via TLS")
 		c.Net = "tcp-tls"

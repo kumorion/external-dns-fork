@@ -205,6 +205,9 @@ func (im *TXTRegistry) Records(ctx context.Context) ([]*endpoint.Endpoint, error
 	// exists, and isAbsent would then skip re-creating it.
 	im.existingTXTs.reset()
 
+	// hypothesis 3: the TXT registry reads ownership purely from the provider list.
+	// No AXFR data means no heritage TXT records are seen, so from the registry's
+	// point of view ExternalDNS owns nothing, even for records it created last cycle.
 	records, err := im.provider.Records(ctx)
 	if err != nil {
 		return nil, err
